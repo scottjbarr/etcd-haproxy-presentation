@@ -1,0 +1,261 @@
+etcd and hadiscover
+
+28 Sep 2015
+Tags: go golang etcd hadiscover haproxy microservices
+
+Scott Barr
+Software Guy
+
+
+* Who am I?
+
+- Loves building systems
+- Performance matters
+- Golang, Ruby, Python, PHP, Javascript
+- Carrier Integration Team Tech Lead, [[http://www.temando.com][Temando]]
+- Twitter [[https://twitter.com/scottjbarr][@scottjbarr]]
+
+* Temando
+
+.image ./images/temando-logo.png
+
+- Intelligent Fulfillment for the Future of Commerce
+- Interesting problems
+- Amazing people
+- Great place to work
+- We're hiring!
+
+
+* Microservices
+
+Yay!
+
+- Possibly small
+- Discreet functionality
+- Isolated. Lack of constraints
+- Often fast to build
+- Safe to deploy
+
+
+* Microservices
+
+Some issues to consider
+
+- Deployment
+- Where are my instances?
+- Versioning!!!
+
+
+* A Microservice
+
+.image ./images/microservice-diag-0.png
+
+This isn't very useful
+
+1. No redundancy
+2. No scalability
+3. DNS points to the instance?
+
+* Let's Deploy More Instances
+
+.image ./images/microservice-diag-1.png
+
+- Deploy another instance
+- Add a load balancer... Hello HAProxy
+
+
+* Add Yet Another Instance
+
+.image ./images/microservice-diag-2.png
+
+- And we edit the HAProxy config again
+- ... and again, and again, and again
+- Your Ops team will not buy you a nice Secret Santa gift :(
+
+
+* This is not dynamic!
+
+Let's talk about how we can improve this.
+
+Goals
+
+1. Keep delivering value with Microservices.
+2. Ops team might even love you a little bit.
+
+
+* Coreos
+
+- Lightweight, Linux based OS
+- Open-source
+- Infrastructure for clustered deployments
+- Automation
+- Service discovery
+- Configuration
+
+
+* etcd
+
+.image ./images/etcd-horizontal-color.png
+
+- Distributed, consistent key-value store
+- Built for shared configuration and service discovery
+- curl'able user facing API (HTTP+JSON)
+- Optional SSL client cert authentication
+- Fast! benchmarked 1000s of writes/s per instance
+- Uses Raft for replication
+- Open source
+
+* etcdctl
+
+- Useful command line interface to etcd
+- Bundled with the etcd package
+
+
+* HAProxy
+
+.image ./images/haproxy-logo-med.png
+
+- TCP and HTTP load balancer and proxy
+- Written in C
+- Excellent reputation
+- Fast, robust
+- Open source
+
+
+* Hadiscover
+
+- Generates a HAProxy configuration file based on etcd
+- Leverages gracefully HAProxy reloading
+- Open source
+
+
+* Installation
+
+Assuming you have Go installed, and are running OS X...
+
+  $ brew install haproxy
+  $ go get gihub.com/coreos/etcd
+  $ go get github.com/adetante/hadiscover
+
+
+* Start etcd
+
+  $ etcd -data-dir dot -name dot -debug
+  21:00 $ etcd -data-dir dot -name dot -debug
+  2015/09/24 21:00:47 etcdmain: setting maximum number of CPUs to 1, total number of available CPUs is 8
+  2015/09/24 21:00:47 etcdmain: the server is already initialized as member before, starting as etcd member...
+  2015/09/24 21:00:47 etcdmain: listening for peers on http://localhost:2380
+  2015/09/24 21:00:47 etcdmain: listening for peers on http://localhost:7001
+  2015/09/24 21:00:47 etcdmain: listening for client requests on http://localhost:2379
+  2015/09/24 21:00:47 etcdmain: listening for client requests on http://localhost:4001
+
+etcd is now running in debug mode, and reachable at `http://127.0.0.1:4001`
+
+
+* Start hadiscover
+
+Edit your HAProxy config template, in this case `haproxy.cfg.tpl`
+
+    hadiscover -config ./haproxy.cfg.tpl \
+        -etcd http://127.0.0.1:4001 \
+        -ha /usr/local/bin/haproxy \
+        -key foo-app/services
+
+
+* Register a Service
+
+Each service...
+
+1. Starts, binds to address and port.
+2. Notifys etcd where it is located
+3. Use a TTL on the message
+
+Assuming your app was listening on `127.0.0.1:9001` the app would send this request to etcd which sets a name, value and TTL.
+
+  curl -L http://127.0.0.1:4001/v2/keys/foo-app/services/127.0.0.1:9001 \
+       -XPUT -d \
+       value=127.0.0.1:9001 \
+       -d ttl=30
+
+
+* Let's See
+
+etcdctl is helpful here.
+
+  $ etcdctl ls profile_service/services
+  /profile_service/services/neo.local:8100
+
+  $ etcdctl get profile_service/services/neo.local:8100
+  neo.local:8100
+
+
+* Curl'able
+
+List services. Note the `nodes` array, and the `expiration`.
+
+  $ curl -s http://127.0.0.1:4001/v2/keys/profile_service/services
+  {
+     "node" : {
+       "key" : "/profile_service/services",
+       "createdIndex" : 1888,
+       "dir" : true,
+       "modifiedIndex" : 1888,
+       "nodes" : [{
+         "modifiedIndex" : 2600,
+         "value" : "neo.local:8100",
+         "ttl" : 42,
+         "key" : "/profile_service/services/neo.local:8100",
+         "createdIndex" : 2600,
+         "expiration" : "2015-09-24T10:42:47.752909253Z"
+       }]
+     },
+     "action" : "get"
+  }
+
+* Curl'able
+
+Detail of one service. Note the `value` and the `expiration`.
+
+  $ curl -s http://127.0.0.1:4001/v2/keys/profile_service/services/neo.local:8100
+
+  {
+    "action" : "get",
+    "node" : {
+      "modifiedIndex" : 2607,
+      "ttl" : 59,
+      "expiration" : "2015-09-24T10:46:17.776231524Z",
+      "key" : "/profile_service/services/neo.local:8100",
+      "createdIndex" : 2607,
+      "value" : "neo.local:8100"
+    }
+  }
+
+
+* So... What?
+
+What happens?
+
+1. etcd receives details from an instance, with a TTL
+2. hadiscover is listening to the appropriate key, receives message
+3. hadiscover rewrites the HAProxy config, gracefull restarts HAProxy
+4. Instance sends an update to etcd every x seconds
+
+Later on...
+
+5. Instance goes down, therefore updates to etcd stop
+6. TTL expires
+7. hadiscover receives update
+8. HAProxy config written, the instance is gone
+
+
+* Demo Time!
+
+
+* Questions?
+
+
+* References
+
+- http://github.com/coreos/etcd
+- http://github.com/adetante/hadiscover
+- http://www.haproxy.org/
