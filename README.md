@@ -1,8 +1,15 @@
-# Start etcd
+# View Slides
+
+    go get golang.org/x/tools/present
+    present
+
+# Demo Notes
+
+Start etcd
 
     etcd -data-dir dot -name dot -debug
 
-# Start hadiscover
+Start hadiscover
 
     hadiscover -config ./haproxy.cfg.tpl -etcd http://127.0.0.1:4001 -ha /usr/local/bin/haproxy -key xps-integration/services
 
@@ -14,7 +21,7 @@ or (depending on which config)
 
     http://127.0.0.1:8080/stats
 
-# Start services
+Start services
 
 - dynamic port range
 - register with etcd, with a ttl
